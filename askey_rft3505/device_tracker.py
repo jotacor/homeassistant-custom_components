@@ -18,7 +18,6 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_PASSWORD): cv.string
 })
 
-
 def get_scanner(hass, config):
     """Validate the configuration and return a scanner."""
 
@@ -35,6 +34,7 @@ class AskeyDeviceScanner(DeviceScanner):
         self.password = config[CONF_PASSWORD]
 
         self.parse_macs = re.compile(r'([0-9a-fA-F]{2}:' + '[0-9a-fA-F]{2}:' + '[0-9a-fA-F]{2}:' + '[0-9a-fA-F]{2}:' + '[0-9a-fA-F]{2}:' + '[0-9a-fA-F]{2})')
+        self.parse_device_data = re.compile(r'var deviceData=([\w\W]+?);')
 
         self.login_url = 'http://{ip}/te_acceso_router.cgi'.format(**{'ip': self.host})
 
@@ -45,7 +45,6 @@ class AskeyDeviceScanner(DeviceScanner):
         """Scan for new devices and return a list with found device IDs."""
         self._update_info()
         return self.last_results
-
 
     def get_device_name(self, device):
         """This router doesn't save the name of the wireless device."""
@@ -73,13 +72,19 @@ class AskeyDeviceScanner(DeviceScanner):
 
         session = requests.Session()
         login_response = session.post(self.login_url, data=data, headers=headers)
-
+        result = list()
         if login_response.status_code == 200:
             url = 'http://{}/te_mapa_red_local.html'.format(self.host)
             response = session.get(url, headers=headers, timeout=4)
             response_string = str(response.content)
-            parsed_macs = self.parse_macs.findall(response_string)
-            result = [ mac.replace(" ", "_") for mac in parsed_macs ]
+            for line in response_string.split("\n"):
+                if "deviceData" in line:
+                    line_replaced = line.replace("\\", "")
+                    devices_data = eval(self.parse_device_data.search(line_replaced).group(1))
+                    break
+            for device in devices_data:
+                if device[0] == '1':
+                    result.append(device[6])
         else:
             result = None
             _LOGGER.info('Error connecting to the router...')
